@@ -1,0 +1,4 @@
+samples/bin
+samples/.vs
+samples/*.htm
+samples/build

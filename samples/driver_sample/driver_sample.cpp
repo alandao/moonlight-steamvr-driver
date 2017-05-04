@@ -172,13 +172,13 @@ public:
 		m_flSecondsFromVsyncToPhotons = vr::VRSettings()->GetFloat( k_pch_Sample_Section, k_pch_Sample_SecondsFromVsyncToPhotons_Float );
 		m_flDisplayFrequency = vr::VRSettings()->GetFloat( k_pch_Sample_Section, k_pch_Sample_DisplayFrequency_Float );
 
-		DriverLog( "driver_null: Serial Number: %s\n", m_sSerialNumber.c_str() );
-		DriverLog( "driver_null: Model Number: %s\n", m_sModelNumber.c_str() );
-		DriverLog( "driver_null: Window: %d %d %d %d\n", m_nWindowX, m_nWindowY, m_nWindowWidth, m_nWindowHeight );
-		DriverLog( "driver_null: Render Target: %d %d\n", m_nRenderWidth, m_nRenderHeight );
-		DriverLog( "driver_null: Seconds from Vsync to Photons: %f\n", m_flSecondsFromVsyncToPhotons );
-		DriverLog( "driver_null: Display Frequency: %f\n", m_flDisplayFrequency );
-		DriverLog( "driver_null: IPD: %f\n", m_flIPD );
+		DriverLog( "driver_moonlight: Serial Number: %s\n", m_sSerialNumber.c_str() );
+		DriverLog( "driver_moonlight: Model Number: %s\n", m_sModelNumber.c_str() );
+		DriverLog( "driver_moonlight: Window: %d %d %d %d\n", m_nWindowX, m_nWindowY, m_nWindowWidth, m_nWindowHeight );
+		DriverLog( "driver_moonlight: Render Target: %d %d\n", m_nRenderWidth, m_nRenderHeight );
+		DriverLog( "driver_moonlight: Seconds from Vsync to Photons: %f\n", m_flSecondsFromVsyncToPhotons );
+		DriverLog( "driver_moonlight: Display Frequency: %f\n", m_flDisplayFrequency );
+		DriverLog( "driver_moonlight: IPD: %f\n", m_flIPD );
 	}
 
 	virtual ~CSampleDeviceDriver()
@@ -344,6 +344,10 @@ public:
 		pose.result = TrackingResult_Running_OK;
 		pose.deviceIsConnected = true;
 
+		//not sure what effects this will have, but technically it is true.
+		pose.willDriftInYaw = true;
+
+
 		pose.qWorldFromDriverRotation = HmdQuaternion_Init( 1, 0, 0, 0 );
 		pose.qDriverFromHeadRotation = HmdQuaternion_Init( 1, 0, 0, 0 );
 		
@@ -381,6 +385,7 @@ private:
 	float m_flSecondsFromVsyncToPhotons;
 	float m_flDisplayFrequency;
 	float m_flIPD;
+
 };
 
 //-----------------------------------------------------------------------------
@@ -407,6 +412,11 @@ private:
 	CSampleDeviceDriver *m_pNullHmdLatest;
 	
 	bool m_bEnableNullDriver;
+
+	//Below variables hold a view of our memory mapped file.
+	HANDLE hMapFile;
+	LPCTSTR pBuf;
+
 };
 
 CServerDriver_Sample g_serverDriverNull;
@@ -416,6 +426,25 @@ EVRInitError CServerDriver_Sample::Init( vr::IVRDriverContext *pDriverContext )
 {
 	VR_INIT_SERVER_DRIVER_CONTEXT( pDriverContext );
 	InitDriverLog( vr::VRDriverLog() );
+
+	//Existence of the device(phone) is done by trying to open a file mapping with the name of moonlightvr. If it doesn't exist, we'll exit this driver.
+	hMapFile = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, "moonlightvr");
+	if (hMapFile == NULL)
+	{
+		DriverLog("driver_moonlight: Couldn't create file mapping object (%d).\n", GetLastError());
+		//An error like this most likely means we couldn't find our phone.
+		return VRInitError_Driver_HmdDisplayNotFound;
+	}
+	pBuf = (LPTSTR)MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, 10000);
+	if (pBuf == NULL)
+	{
+		DriverLog("Could not map view of file (%d).\n",
+			GetLastError());
+
+		CloseHandle(hMapFile);
+		//Just throw a panic error to prevent the driver from continuing.
+		return VRInitError_Driver_Unknown;
+	}
 
 	m_pNullHmdLatest = new CSampleDeviceDriver();
 	vr::VRServerDriverHost()->TrackedDeviceAdded( m_pNullHmdLatest->GetSerialNumber().c_str(), vr::TrackedDeviceClass_HMD, m_pNullHmdLatest );
@@ -427,6 +456,11 @@ void CServerDriver_Sample::Cleanup()
 	CleanupDriverLog();
 	delete m_pNullHmdLatest;
 	m_pNullHmdLatest = NULL;
+
+	UnmapViewOfFile(pBuf);
+	CloseHandle(hMapFile);
+
+
 }
 
 
